@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reconhecimento facial com FACEAPI</title>
+  <link rel="stylesheet" href="./assets/css/index.css">
+</head>
+<body>
+  <h1>Olá</h1>
+  <video autoplay id="cam" width="720" height="500" muted></video>
+  <script src="./node_modules/face-api.js/dist/face-api.min.js"></script>
+  <script src="./assets/js/index.js"></script>
+</body>
+<script>
+  window.onload = function(){
+  const startvideo = () =>{
+  const cam  = document.getElementById('cam');
+      navigator.getUserMedia({
+        video: true},
+        stream => cam.srcObject = stream,
+        error => console.error(error)
+      )
+  }
+   // importar as redes neurais
+   // tinyFaceDetector Quadrado do rosto
+   // faceLandmark68Net traços do rosto
+   // faceRecognitionNet Quem sou eu
+   // faceExpressionNet Detectar expressões
+   // ageGenderNet Idade e Genero
+   
+   const loadLabels = () =>{
+     const labels = ['Heverson Damasceno Juca Rolim'];
+     return Promise.all(labels.map(async label=>{
+        const descriptions = []
+        // for para percorrer se tiver mais que umas
+        const image = await faceapi.fetchImage(`./lib/labels/${label}/1.png`);
+        const detections = await faceapi.detectSingleFace(image)
+        .withFaceLandmarks() //detecta landmarkes
+        .withFaceDescriptor() // expressões faciais
+        descriptions.push(detections.descriptor)
+        return new faceapi.LabeledFaceDescriptors(label, descriptions); // retorna uma promise
+     }));
+   }
+
+   Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('./lib/models'),  
+      faceapi.nets.faceLandmark68Net.loadFromUri('./lib/models'),  
+      faceapi.nets.faceRecognitionNet.loadFromUri('./lib/models'),
+      faceapi.nets.faceExpressionNet.loadFromUri('./lib/models'),  
+      faceapi.nets.ageGenderNet.loadFromUri('./lib/models'),   
+      faceapi.nets.ssdMobilenetv1.loadFromUri('./lib/models')
+    ]).then(startvideo);    
+
+    cam.addEventListener('play', async() =>{
+      const canvas = faceapi.createCanvasFromMedia(cam);
+      const canvasSize = { width: cam.width, height: cam.height}
+      const labels = await loadLabels();
+
+      faceapi.matchDimensions(canvas, canvasSize);
+      document.body.appendChild(canvas);
+      // real time 
+      setInterval(async()=>{
+        const detections = await faceapi.detectAllFaces(
+          cam, 
+          new faceapi.TinyFaceDetectorOptions()
+        ).withFaceLandmarks() //detecta landmarkes
+        .withFaceExpressions() // expressões faciais
+        .withAgeAndGender() // genero
+        .withFaceDescriptors()
+        const resizedDetections = faceapi.resizeResults(detections, canvas)
+        // resultados esperados numa taxa de 60%
+        const faceMatcher = new faceapi.FaceMatcher(labels, 0.6);
+        const results = resizedDetections.map(d => 
+          faceMatcher.findBestMatch(d.descriptor)
+        );
+
+        canvas.getContext('2d').clearRect(0,0,canvas.width, canvas.height);
+        faceapi.draw.drawDetections(canvas, resizedDetections); // desenha o quadrado nos rostos
+        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections); // desenha os landmarkes
+        faceapi.draw.drawFaceExpressions(canvas, resizedDetections); // desenha as expressões
+        resizedDetections.forEach(detection => {
+          const {age, gender, genderProbability} = detection;
+          new faceapi.draw.DrawTextField([
+            `${parseInt(age, 10)} years`,
+            `${gender} (${parseInt(genderProbability*100,10)})`
+          ], detection.detection.box.topRight).draw(canvas)
+        })
+        // desenhar os resultados das labels
+        results.forEach((result, index) => {
+          const box = resizedDetections[index].detection.box;
+          const {label, distance} = result;
+          new faceapi.draw.DrawTextField([
+            `${label} (${parseInt(distance*100,10)})`
+          ], box.bottomRight).draw(canvas);
+        })
+      },100)
+    })
+  }
+
+</script>
+</html>
